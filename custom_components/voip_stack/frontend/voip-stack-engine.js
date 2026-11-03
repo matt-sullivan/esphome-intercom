@@ -175,6 +175,8 @@ class VoipStackEngine extends EventTarget {
     this._lastActivityEvent = null;
     this._lastSoftphoneState = null;
     this._softphoneSubscriberSelectors = new Map();
+    // Subscribers that keep a phone online without showing it (show_on_ring).
+    this._backgroundSoftphoneSubscribers = new Set();
     this._lastSoftphoneStates = new Map();
     this._softphoneScopeSubscriptions = new Map();
     this._phoneStateSubscribers = new Set();
@@ -1386,9 +1388,7 @@ class VoipStackEngine extends EventTarget {
     this._lastSoftphoneStates.set(key, state);
     // An owned session survives its last Lovelace view. Its confirmed media
     // must therefore also attach when the remote party answers after unmount.
-    const hasLiveView = [...this._softphoneSubscribers].some((listener) =>
-      softphoneStateMatches(state, this._softphoneSubscriberSelectors.get(listener) || {}));
-    if (endpointId && this.softphoneCallIdFor(endpointId) && !hasLiveView) {
+    if (endpointId && this.softphoneCallIdFor(endpointId) && !this.hasLiveSoftphoneView(state)) {
       void this.syncOwnedSoftphoneState({ ...state, endpoint_id: endpointId,
         device_id: deviceId, softphone: true }, state).catch((error) => {
         this.dispatchEvent(new CustomEvent("error", { detail: { message: error?.message || String(error) } }));
@@ -1407,11 +1407,24 @@ class VoipStackEngine extends EventTarget {
     }
   }
 
-  subscribeSoftphoneState(cb, selector = {}) {
+  // Whether a card or dashboard showing this phone is on the page.
+  hasLiveSoftphoneView(state) {
+    return [...this._softphoneSubscribers].some((listener) =>
+      !this._backgroundSoftphoneSubscribers.has(listener) &&
+      softphoneStateMatches(state, this._softphoneSubscriberSelectors.get(listener) || {}));
+  }
+
+  // Call the cb callback with the state of the phones matching selector,
+  // replaying the last known states first. While any subscription for a phone
+  // is open the backend counts that browser phone as online. A background
+  // subscriber (show_on_ring) keeps the phone online but shows nothing.
+  // Returns an unsubscribe function.
+  subscribeSoftphoneState(cb, selector = {}, { background = false } = {}) {
     const normalised = normaliseSoftphoneSelector(selector);
     const key = softphoneScopeKey(normalised);
     this._softphoneSubscribers.add(cb);
     this._softphoneSubscriberSelectors.set(cb, normalised);
+    if (background) this._backgroundSoftphoneSubscribers.add(cb);
     let record = this._softphoneScopeSubscriptions.get(key);
     if (!record) {
       record = {
@@ -1433,6 +1446,7 @@ class VoipStackEngine extends EventTarget {
     return () => {
       this._softphoneSubscribers.delete(cb);
       this._softphoneSubscriberSelectors.delete(cb);
+      this._backgroundSoftphoneSubscribers.delete(cb);
       record.refs = Math.max(0, record.refs - 1);
       if (record.refs || this._softphoneScopeHasSession(record)) return;
       try { record.unsub?.(); } catch (_) {}

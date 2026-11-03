@@ -1565,6 +1565,23 @@ unmounted._onSoftphoneState({{
 await new Promise(resolve => setTimeout(resolve,0));
 assert.equal(unmountedResumes,1,"An answer after dashboard unmount must attach media exactly once");
 
+// A show_on_ring background subscription is not a card on screen. When the
+// other side answers a call this browser placed, after its card unmounted,
+// the engine must still attach the call's media itself.
+const background = new Engine();
+let backgroundResumes = 0;
+background.resumeSession = async () => {{ backgroundResumes++; }};
+background.subscribeSoftphoneState(() => {{}}, {{device_id:"bg-device"}}, {{background:true}});
+const bgState = {{endpoint_id:"bg-desk",device_id:"bg-device",state:"in_call",call_id:"bg-call"}};
+assert.equal(background.hasLiveSoftphoneView(bgState),false);
+const releaseBgCard = background.subscribeSoftphoneState(() => {{}}, {{device_id:"bg-device"}});
+assert.equal(background.hasLiveSoftphoneView(bgState),true,"A card subscription is a live view");
+releaseBgCard();
+background.claimSoftphoneSession("bg-call","bg-desk");
+background._onSoftphoneState(bgState, {{device_id:"bg-device"}});
+await new Promise(resolve => setTimeout(resolve,0));
+assert.equal(backgroundResumes,1,"A background subscription must not suppress media attach");
+
 // A live phone card remains first to supply its microphone filtering choice.
 const preferred = new Engine();
 preferred.claimSoftphoneSession("preferred-call","preferred-desk");

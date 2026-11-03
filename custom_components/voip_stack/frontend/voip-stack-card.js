@@ -47,6 +47,9 @@ const {
 } = await import(`./voip-stack-card-view.js?v=${encodeURIComponent(VOIP_STACK_MODULE_VERSION)}`);
 await import(`./voip-stack-card-editor.js?v=${encodeURIComponent(VOIP_STACK_MODULE_VERSION)}`);
 await import(`./voip-stack-dashboard-card.js?v=${encodeURIComponent(VOIP_STACK_MODULE_VERSION)}`);
+// Start the show_on_ring module to potentially keep a phone online and open
+// its view when it rings.
+await import(`./voip-stack-show-on-ring.js?v=${encodeURIComponent(VOIP_STACK_MODULE_VERSION)}`);
 const HANGUP_SERVICE_TIMEOUT_MS = 3000;
 
 function settleServiceWithin(promise, timeoutMs, timeoutMessage) {
