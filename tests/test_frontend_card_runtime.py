@@ -64,6 +64,8 @@ source = source
       softphoneSnapshotSupersedes, targetFromRosterEntry, terminalPeerLabel,
     }} = globalThis.__cardModel;`,
   )
+  // The vm can't run dynamic imports; show_on_ring has its own tests.
+  .replace(/await import[^;]*voip-stack-show-on-ring[^;]*;/, "")
   .replace("class VoipStackCard extends HTMLElement", "export class VoipStackCard extends HTMLElement");
 
 const serviceCalls = [];

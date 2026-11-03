@@ -201,6 +201,25 @@ class VoipStackCardEditor extends HTMLElement {
     recordingGroup.appendChild(recordingLabel);
     wrap.appendChild(recordingGroup);
     recordingInput.onchange = (event) => this._boolChanged("show_recording_controls", event.target.checked);
+    
+    // A section for the show_on_ring option, which keeps the phone online and
+    // opens its view when it rings. The card itself ignores this option, it's
+    // voip-stack-show-on-ring.js that implements this behaviour.
+    const showOnRingGroup = document.createElement("div");
+    showOnRingGroup.className = "form-group checkbox-group";
+    const showOnRingLabel = document.createElement("label");
+    const showOnRingInput = document.createElement("input");
+    showOnRingInput.type = "checkbox";
+    showOnRingLabel.appendChild(showOnRingInput);
+    showOnRingLabel.appendChild(document.createTextNode(` ${this._t("Show on ring")}`));
+    showOnRingGroup.appendChild(showOnRingLabel);
+    const showOnRingInfo = document.createElement("div");
+    showOnRingInfo.className = "info";
+    showOnRingInfo.textContent = this._t(
+      "Keep this phone online on every view of this dashboard, and open this view when it rings. One card per dashboard.");
+    showOnRingGroup.appendChild(showOnRingInfo);
+    wrap.appendChild(showOnRingGroup);
+    showOnRingInput.onchange = (event) => this._boolChanged("show_on_ring", event.target.checked);
 
     this.appendChild(wrap);
 
@@ -225,6 +244,8 @@ class VoipStackCardEditor extends HTMLElement {
       extendedInfoInput,
       recordingGroup,
       recordingInput,
+      showOnRingGroup,
+      showOnRingInput,
     };
   }
 
@@ -316,6 +337,9 @@ class VoipStackCardEditor extends HTMLElement {
       els.recordingGroup.classList.toggle("hidden", !softphoneMode);
       els.recordingInput.checked = !!this._config.show_recording_controls;
     }
+
+    els.showOnRingGroup.classList.toggle("hidden", !softphoneMode);
+    els.showOnRingInput.checked = !!this._config.show_on_ring;
   }
 
   _nameChanged(value) {

@@ -267,6 +267,13 @@ groups and video settings. Bind each card to the intended Device. Two cards in
 one browser tab do not create two physical microphones or cameras, so use a
 separate browser or Companion session for simultaneous independent media.
 
+A phone is normally online only while a card for it is on screen. On a
+dashboard with several views, such as a wall tablet, enable **Show on ring**
+(`show_on_ring: true`) on one phone card: the phone then stays online on every
+view of that dashboard, and the dashboard opens the card's view when the phone
+rings. Anyone who opens the dashboard handles that phone's calls, including
+Auto Answer if it is on.
+
 Numeric extensions must be unique across HA phones, SIP accounts, ESPHome
 phones, manual contacts and Assist. If discovery introduces a duplicate,
 **Settings > System > Repairs** lists the extension and the conflicting
