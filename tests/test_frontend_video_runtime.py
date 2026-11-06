@@ -1412,8 +1412,11 @@ async function startSender() {{
   await sender._replaceSender("vp8", 3, "", false);
   return [sender, encoders.at(-1)];
 }}
-// Emit 15 fps output with the given frame size for a little over 2 s.
+// Emit 15 fps output with the given frame size for a little over 2 s, and
+// return how many chunks went out before the encoder was flagged.
 function emit(encoder, bytes) {{
+  const warned = warnings.length;
+  let flaggedAfter = null;
   for (let i = 0; i <= 31; i++) {{
     encoder.init.output({{
       type: i === 0 ? "key" : "delta",
@@ -1421,16 +1424,20 @@ function emit(encoder, bytes) {{
       timestamp: Math.round(i * 1000000 / 15),
       copyTo(target) {{ target.fill(0); }},
     }});
+    if (flaggedAfter === null && warnings.length > warned) flaggedAfter = i + 1;
   }}
+  return flaggedAfter;
 }}
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 // A hardware encoder at ~16 Mbit/s against a 600 kbit/s target is switched to
-// software once, and the next frame is a key frame.
+// software, and the next frame is a key frame. Its first two 135 KB delta
+// frames exceed the 150 KB allowed in the first half second, so it is caught
+// on the third chunk.
 const [overshooting, hardware] = await startSender();
 assert.equal(hardware.configs[0].hardwareAcceleration, "prefer-hardware");
 overshooting._forceCameraKeyFrame = false;
-emit(hardware, 135000);
+assert.equal(emit(hardware, 135000), 3);
 await settle();
 assert.equal(hardware.configs.length, 2);
 assert.equal(hardware.configs[1].hardwareAcceleration, "prefer-software");
@@ -1440,6 +1447,14 @@ assert.match(warnings.at(-1), /switching to software encoding/);
 emit(hardware, 135000);
 await settle();
 assert.equal(hardware.configs.length, 2);
+
+// A smaller overshoot, 25 KB delta frames (~3 Mbit/s), is caught before half
+// a second has passed: its seventh delta frame, at 0.47 s, takes it to 175 KB,
+// over the 150 KB allowed. With the key frame that is the eighth chunk.
+const [, moderate] = await startSender();
+assert.equal(emit(moderate, 25000), 8);
+await settle();
+assert.equal(moderate.configs.length, 2);
 
 // An encoder near its target is left alone, including a large first key frame.
 const [, onTarget] = await startSender();

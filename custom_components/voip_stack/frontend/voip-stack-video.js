@@ -26,7 +26,12 @@ const CODEC_SETUP_TIMEOUT_MS = 3000;
 const MEDIA_CLEANUP_TIMEOUT_MS = 500;
 const JPEG_CAMERA_QUALITY = 0.72;
 const CAMERA_BITRATE = 600000;
+// EncoderRateGuard watches a camera encoder's first ENCODER_RATE_WINDOW_SECONDS
+// of output for more than ENCODER_OVERSHOOT_FACTOR times its target rate. Until
+// ENCODER_RATE_MIN_WINDOW_SECONDS have passed it allows that window's full
+// share (150 KB at 600 kbit/s), so a few early frames can't trip it.
 const ENCODER_RATE_WINDOW_SECONDS = 2;
+const ENCODER_RATE_MIN_WINDOW_SECONDS = 0.5;
 const ENCODER_OVERSHOOT_FACTOR = 4;
 
 function settleWithin(promise, timeoutMs = MEDIA_CLEANUP_TIMEOUT_MS) {
@@ -46,29 +51,40 @@ function settleWithin(promise, timeoutMs = MEDIA_CLEANUP_TIMEOUT_MS) {
 
 // Some Android hardware encoders ignore the configured bitrate on camera
 // frames and send many times the target, which backs slower network paths up
-// by tens of seconds. Measure the first seconds of output once.
+// by seconds. Watch the first seconds of output, and flag the encoder as
+// soon as its delta frames exceed ENCODER_OVERSHOOT_FACTOR times the target.
+// Detect as soon as possible, since everything sent before the switch delays
+// live video.
 class EncoderRateGuard {
   constructor(targetBitrate) {
     this.targetBitrate = targetBitrate;
-    // Bits per second over the first ENCODER_RATE_WINDOW_SECONDS of output,
-    // or null while still measuring.
+    // Bits per second of delta frames when the encoder was flagged.
     this.measuredBitrate = null;
-    // True if measuredBitrate is over ENCODER_OVERSHOOT_FACTOR times the target.
     this.overTarget = false;
-    this.bytes = 0;
+    this.done = false;
+    this.deltaBytes = 0;
     this.startUs = null;
   }
 
-  // Count one encoded chunk. Chunks after the measuring window are ignored.
+  // Count one encoded chunk until the encoder is flagged or the window ends.
   addChunk(chunk) {
-    if (this.measuredBitrate !== null) return;
+    if (this.done) return;
     const timestamp = Number(chunk.timestamp || 0);
     if (this.startUs === null) this.startUs = timestamp;
-    this.bytes += chunk.byteLength;
     const elapsedSeconds = (timestamp - this.startUs) / 1000000;
-    if (elapsedSeconds < ENCODER_RATE_WINDOW_SECONDS) return;
-    this.measuredBitrate = this.bytes * 8 / elapsedSeconds;
-    this.overTarget = this.measuredBitrate > this.targetBitrate * ENCODER_OVERSHOOT_FACTOR;
+    // Key frames are large on any encoder, so only delta frames count.
+    if (chunk.type !== "key") this.deltaBytes += chunk.byteLength;
+    const windowSeconds = Math.max(elapsedSeconds, ENCODER_RATE_MIN_WINDOW_SECONDS);
+    const allowedBytes =
+      this.targetBitrate / 8 * ENCODER_OVERSHOOT_FACTOR * windowSeconds;
+    if (this.deltaBytes > allowedBytes) {
+      // Log the rate actually sent, not the rate over the minimum window.
+      this.measuredBitrate = this.deltaBytes * 8 / Math.max(elapsedSeconds, 0.001);
+      this.overTarget = true;
+      this.done = true;
+    } else if (elapsedSeconds >= ENCODER_RATE_WINDOW_SECONDS) {
+      this.done = true;
+    }
   }
 }
 
