@@ -162,6 +162,7 @@ class VoipStackEngine extends EventTarget {
     this._busUnsub = null;
     this._busSubscribePending = false;
     this._busSubscribeRetryTimer = null;
+    this._connectionReady = () => this._resubscribeAfterReconnect();
     this._callSubscribers = new Set();
     this._softphoneSubscribers = new Set();
     this._lastEvents = new Map();
@@ -246,6 +247,8 @@ class VoipStackEngine extends EventTarget {
     const conn = hass?.connection || null;
     if (!conn) return;
     if (conn !== this._busConnection) {
+      this._busConnection?.removeEventListener?.("ready", this._connectionReady);
+      conn.addEventListener?.("ready", this._connectionReady);
       if (this._busUnsub) this._busUnsub();
       this._busUnsub = null;
       this._busSubscribePending = false;
@@ -286,7 +289,11 @@ class VoipStackEngine extends EventTarget {
     }
     if (wanted && !this._busUnsub && !this._busSubscribePending) {
       this._busSubscribePending = true;
-      conn.subscribeMessage((event) => this._onBusEvent(event), { type: WS_SUBSCRIBE_CALL_EVENTS, include_activity: true })
+      conn.subscribeMessage(
+        (event) => this._onBusEvent(event),
+        { type: WS_SUBSCRIBE_CALL_EVENTS, include_activity: true },
+        { resubscribe: false },
+      )
       .then((unsub) => {
         if (this._busConnection === conn && this._wantsBusSubscription()) this._busUnsub = unsub;
         else unsub();
@@ -302,6 +309,21 @@ class VoipStackEngine extends EventTarget {
     for (const record of this._softphoneScopeSubscriptions.values()) {
       this._ensureSoftphoneScopeSubscription(conn, record);
     }
+  }
+
+  // Home Assistant accepts a reconnecting frontend before VoIP Stack has
+  // loaded, and home-assistant-js-websocket drops a resubscribe that fails then
+  // without telling anyone. So the engine subscribes with resubscribe: false
+  // and re-sends its own subscriptions after each reconnect, retrying until
+  // VoIP Stack answers. Otherwise a phone with no card on screen stays offline
+  // after an HA restart until the page reloads.
+  _resubscribeAfterReconnect() {
+    const conn = this._busConnection;
+    if (!conn) return;
+    // The old socket took these subscriptions with it.
+    this._busUnsub = null;
+    for (const record of this._softphoneScopeSubscriptions.values()) record.unsub = null;
+    this._ensureBusSubscriptions(conn);
   }
 
   _isUnknownEndpointError(err) {
@@ -321,6 +343,7 @@ class VoipStackEngine extends EventTarget {
     conn.subscribeMessage(
       (event) => this._onSoftphoneState(event, record.selector),
       request,
+      { resubscribe: false },
     ).then((unsub) => {
       if (this._busConnection === conn && this._softphoneScopeSubscriptions.get(record.key) === record) {
         record.unsub = unsub;

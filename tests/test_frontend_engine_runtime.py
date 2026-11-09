@@ -383,6 +383,48 @@ stopPending();
 await new Promise(resolve => setImmediate(resolve));
 assert.equal(busStops, 2);
 
+// After an HA restart the frontend reconnects before VoIP Stack has loaded, so
+// the first resubscribe fails. The engine must keep retrying, or a phone kept
+// online only by show_on_ring stays offline until the page reloads.
+const restartEngine = new Engine();
+const restartListeners = new Map();
+const restartRequests = [];
+let restartRejects = 0;
+const restartConnection = {{
+  addEventListener(name, callback) {{ restartListeners.set(name, callback); }},
+  removeEventListener() {{}},
+  subscribeMessage: async (listener, request, options) => {{
+    restartRequests.push({{request, options}});
+    if (restartRejects > 0) {{
+      restartRejects--;
+      throw {{code: "unknown_command", message: "Unknown command."}};
+    }}
+    return () => {{}};
+  }},
+}};
+restartEngine.configure({{connection: restartConnection}});
+const stopRestartPhone = restartEngine.subscribeSoftphoneState(
+  () => {{}}, {{endpoint_id: "kitchen"}}, {{background: true}},
+);
+await new Promise(resolve => setImmediate(resolve));
+const phoneRequests = () => restartRequests.filter(
+  item => item.request.type === "voip_stack/subscribe_ha_softphone_state",
+);
+assert.equal(phoneRequests().length, 1);
+assert.equal(phoneRequests()[0].options.resubscribe, false);
+restartRejects = 1;
+restartListeners.get("ready")();
+await new Promise(resolve => setImmediate(resolve));
+assert.equal(phoneRequests().length, 2);
+assert.ok(restartEngine._busSubscribeRetryTimer);
+clearTimeout(restartEngine._busSubscribeRetryTimer);
+restartEngine._busSubscribeRetryTimer = null;
+restartEngine._ensureBusSubscriptions(restartConnection);
+await new Promise(resolve => setImmediate(resolve));
+assert.equal(phoneRequests().length, 3);
+assert.ok(restartEngine._softphoneScopeSubscriptions.get("endpoint:kitchen").unsub);
+stopRestartPhone();
+
 // Activity replay is independent of call termination and does not revive old slots.
 const activityEngine = new Engine();
 activityEngine.claimSoftphoneSession("active-call", "test");
