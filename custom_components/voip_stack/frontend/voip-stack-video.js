@@ -26,10 +26,9 @@ const CODEC_SETUP_TIMEOUT_MS = 3000;
 const MEDIA_CLEANUP_TIMEOUT_MS = 500;
 const JPEG_CAMERA_QUALITY = 0.72;
 const CAMERA_BITRATE = 600000;
-// EncoderRateGuard watches a camera encoder's first ENCODER_RATE_WINDOW_SECONDS
-// of output for more than ENCODER_OVERSHOOT_FACTOR times its target rate. Until
-// ENCODER_RATE_MIN_WINDOW_SECONDS have passed it allows that window's full
-// share (150 KB at 600 kbit/s), so a few early frames can't trip it.
+// EncoderRateGuard watches a camera encoder's first 2s of output for more
+// than 4 times its target rate, totalling at least 0.5s worth of data at
+// that rate.
 const ENCODER_RATE_WINDOW_SECONDS = 2;
 const ENCODER_RATE_MIN_WINDOW_SECONDS = 0.5;
 const ENCODER_OVERSHOOT_FACTOR = 4;
@@ -50,11 +49,9 @@ function settleWithin(promise, timeoutMs = MEDIA_CLEANUP_TIMEOUT_MS) {
 }
 
 // Some Android hardware encoders ignore the configured bitrate on camera
-// frames and send many times the target, which backs slower network paths up
-// by seconds. Watch the first seconds of output, and flag the encoder as
-// soon as its delta frames exceed ENCODER_OVERSHOOT_FACTOR times the target.
-// Detect as soon as possible, since everything sent before the switch delays
-// live video.
+// frames and send many times the target, which backs slower network paths up.
+// Flag the encoder as soon as its delta frames exceed 4 times the target,
+// since everything sent before the switch delays live video.
 class EncoderRateGuard {
   constructor(targetBitrate) {
     this.targetBitrate = targetBitrate;
@@ -66,14 +63,16 @@ class EncoderRateGuard {
     this.startUs = null;
   }
 
-  // Count one encoded chunk until the encoder is flagged or the window ends.
+  // Process each encoded chunk until the encoder is flagged or the window ends.
   addChunk(chunk) {
     if (this.done) return;
     const timestamp = Number(chunk.timestamp || 0);
     if (this.startUs === null) this.startUs = timestamp;
     const elapsedSeconds = (timestamp - this.startUs) / 1000000;
-    // Key frames are large on any encoder, so only delta frames count.
+    // Key frames are large on any encoder, so only monitor delta frames.
     if (chunk.type !== "key") this.deltaBytes += chunk.byteLength;
+    // Trigger only once delta frames total at least 0.5s worth at 4 times the
+    // target, so a normal encoder's first few frames can't trip it.
     const windowSeconds = Math.max(elapsedSeconds, ENCODER_RATE_MIN_WINDOW_SECONDS);
     const allowedBytes =
       this.targetBitrate / 8 * ENCODER_OVERSHOOT_FACTOR * windowSeconds;
